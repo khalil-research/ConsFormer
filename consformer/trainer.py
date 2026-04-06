@@ -127,25 +127,25 @@ class Trainer:
         metrics_str = " ".join(f"{k}={v:.4f}" for k, v in epoch_results.items())
         print(f"{phase.title()} loss={avg_loss:.4f} {metrics_str}")
 
-        return avg_loss, epoch_results["accuracy"]
+        return avg_loss, epoch_results
 
     def train(self):
         """
         Runs the full training loop
         """
-        best_test_acc = 0
+        best_test_loss = float("inf")
         training_start_time = time.time()
         for epoch in range(1, self.num_epochs + 1):
             print(f"\nEpoch {epoch}/{self.num_epochs}")
-            train_loss, train_accuracy= self._run_epoch_iter(self.train_loader, 'training', 1)
+            train_loss, train_metrics = self._run_epoch_iter(self.train_loader, 'training', 1)
 
             if self.scheduler:
                 self.scheduler.step()
 
             if self.test_loader and (epoch % self.log_interval == 0 or epoch == self.num_epochs):
-                test_loss, test_accuracy = self._run_epoch_iter(self.test_loader, 'test', 10)
-                if test_accuracy > best_test_acc:
-                    best_test_acc = test_accuracy
+                test_loss, test_metrics = self._run_epoch_iter(self.test_loader, 'test', 10)
+                if test_loss < best_test_loss:
+                    best_test_loss = test_loss
                     torch.save(self.model.state_dict(), "./saved_models/" + self.model_name + f"_best")
 
                     current_time = time.time() - training_start_time

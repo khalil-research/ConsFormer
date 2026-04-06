@@ -6,6 +6,11 @@ Official implementation of the ICML 2025 paper
 
 ![ConsFormer Architecture](consformer_architecture.png)
 
+Coming Soon: Implementation for the CPAIOR 2026 paper
+
+[*Large Neighborhood Search meets Iterative Neural Constraint Heuristics*](https://arxiv.org/abs/2603.20801).
+
+
 
 ## Code Structure
 
@@ -84,13 +89,13 @@ You can download the data we used [here](https://drive.google.com/file/d/1WP-g_7
 
 If you use this code in your research, please cite:
 ```
-@inproceedings{xu:icml25,
-  title = {Self-Supervised Transformers as Iterative Solution Improvers for Constraint Satisfaction},
-  author = {Yudong Xu and Wenhao Li and Scott Sanner and Elias Boutros Khalil},
-  booktitle = {Proceedings of the 42nd International Conference on Machine Learning (ICML-25)},
-  address = {Vancouver, Canada},
-  year = {2025},
-  url_arxiv = {https://arxiv.org/abs/2502.15794}
+@inproceedings{xu2025self,
+  title={Self-Supervised Transformers as Iterative Solution Improvers for Constraint Satisfaction},
+  author={Xu, Yudong and Li, Wenhao and Sanner, Scott and Khalil, Elias Boutros},
+  booktitle={International Conference on Machine Learning},
+  pages={69432--69450},
+  year={2025},
+  organization={PMLR}
 }
 ```
 

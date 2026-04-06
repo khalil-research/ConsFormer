@@ -169,6 +169,8 @@ class CustomGCOLAccuracy():
 
     def get_per_instance_accuracy(self, predictions, adj_mat, var_inds):
 
+        batch_size, seq_len, _ = predictions.size()
+
         # ============= one-hot-ify prediction ===========
         max_indices = torch.argmax(predictions, dim=-1, keepdim=True)
         predictions_one_hot = torch.zeros_like(predictions, dtype=torch.float32)
@@ -177,8 +179,12 @@ class CustomGCOLAccuracy():
         # ============= feasibility ======================
         # Compute dot product between all node pairs, only nodes with the same color assignement will have value 1
         dot_products = torch.bmm(predictions_one_hot, predictions_one_hot.transpose(1, 2))  # (batch, vertex_count, vertex_count)
+
+        # constraint graphs has diagonal values as true, we want to set them to zero when computing graph coloring accuracy
+        adj_matrix = adj_mat & ~torch.eye(seq_len, seq_len, dtype=torch.bool,device=adj_mat.device).repeat(batch_size, 1, 1)
+
         # Mask the dot products with the adjacency matrix, only adjacent nodes with the same color will have value 1 (ie, violated constraints)
-        num_violated = torch.sum(dot_products * adj_mat, dim=(1,2))  # Only keep values for edges
+        num_violated = torch.sum(dot_products * adj_matrix, dim=(1,2))  # Only keep values for edges
         instances_solved = num_violated == 0
 
         return instances_solved
