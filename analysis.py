@@ -61,7 +61,7 @@ def run_analysis_graph_coloring(trainer, colors, vertices_counts, candidate_pool
             inputs_test = torch.zeros(graph_adj_mat_test.size(0), vertices, colors)
             var_inds_test = torch.ones(graph_adj_mat_test.size(0), vertices, dtype=torch.bool)
             batch_size, seq_len, _ = graph_adj_mat_test.size()
-            constraint_graphs = graph_adj_mat_test.bool() + torch.eye(seq_len, seq_len, dtype=torch.bool).repeat(batch_size, 1, 1)
+            constraint_graphs = graph_adj_mat_test.bool() + torch.eye(seq_len, seq_len, dtype=torch.bool,device=graph_adj_mat_test.device).repeat(batch_size, 1, 1)
 
             if candidate_pool > 1:
                 constraint_graphs = constraint_graphs.repeat(candidate_pool, 1, 1)
@@ -182,7 +182,7 @@ def run_analysis_CUT_GSET(trainer, candidate_pool=1):
         inputs_test = torch.zeros(graph_adj_mat_test.size(0), vertices, 2)
         var_inds_test = torch.ones(graph_adj_mat_test.size(0), vertices, dtype=torch.bool)
         batch_size, seq_len, _ = graph_adj_mat_test.size()
-        constraint_graphs = graph_adj_mat_test.bool() + torch.eye(seq_len, seq_len, dtype=torch.bool).repeat(batch_size,
+        constraint_graphs = graph_adj_mat_test.bool() + torch.eye(seq_len, seq_len, dtype=torch.bool,device=graph_adj_mat_test.device).repeat(batch_size,
                                                                                                              1, 1)
         if candidate_pool > 1:
             constraint_graphs = constraint_graphs.repeat(candidate_pool, 1, 1)

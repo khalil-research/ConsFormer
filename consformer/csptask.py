@@ -131,11 +131,11 @@ class GraphColoringTask(CSPTask):
 
     def get_constraint_graph_adj_mat(self, graph_adj_mat):
         batch_size, seq_len, _ = graph_adj_mat.size()
-        return graph_adj_mat.bool() + torch.eye(seq_len, seq_len, dtype=torch.bool).repeat(batch_size, 1, 1)
+        return graph_adj_mat.bool() + torch.eye(seq_len, seq_len, dtype=torch.bool,device=graph_adj_mat.device).repeat(batch_size, 1, 1)
 
     def calculate_loss_and_accuracy(self, predictions, constraint_graph, var_inds):
         batch_size, seq_len, _ = constraint_graph.size()
-        graph_adj_mat_without_self = constraint_graph.int() - torch.eye(seq_len, seq_len).repeat(batch_size, 1, 1)
+        graph_adj_mat_without_self = constraint_graph & ~torch.eye(seq_len, seq_len, dtype=torch.bool, device=constraint_graph.device).repeat(batch_size, 1, 1)
 
         loss = self.loss_fn(predictions, graph_adj_mat_without_self)
         (num_violated, percent_violated, instances_solved), total_predictions = self.acc_fn.get_accuracy(predictions, graph_adj_mat_without_self)
@@ -245,11 +245,11 @@ class MaxCutTask(CSPTask):
 
     def get_constraint_graph_adj_mat(self, graph_adj_mat):
         batch_size, seq_len, _ = graph_adj_mat.size()
-        return graph_adj_mat.bool() + torch.eye(seq_len, seq_len, dtype=torch.bool).repeat(batch_size, 1, 1)
+        return graph_adj_mat.bool() + torch.eye(seq_len, seq_len, dtype=torch.bool, device=graph_adj_mat.device).repeat(batch_size, 1, 1)
 
     def calculate_loss_and_accuracy(self, predictions, constraint_graph, var_inds):
         batch_size, seq_len, _ = constraint_graph.size()
-        graph_adj_mat_without_self = constraint_graph.int() - torch.eye(seq_len, seq_len).repeat(batch_size, 1, 1)
+        graph_adj_mat_without_self = constraint_graph & ~torch.eye(seq_len, seq_len, dtype=torch.bool, device=constraint_graph.device).repeat(batch_size, 1, 1)
 
         loss = self.loss_fn(predictions, graph_adj_mat_without_self)
         cut_sizes = self.acc_fn.get_per_instance_cut_size(predictions, graph_adj_mat_without_self)
