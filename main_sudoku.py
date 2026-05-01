@@ -5,6 +5,7 @@ from consformer.csptask import SudokuTask
 from consformer.solvers import ConsFormer
 from consformer.criterion import *
 from consformer.trainer import Trainer
+from consformer.destroy import *
 from analysis import *
 
 if torch.cuda.is_available():
@@ -40,9 +41,10 @@ def parse_args():
                         required=False)
     parser.add_argument("--rpe", type=str, choices=["learned", "mask", "no"], default="no",
                         help="if present use binary constrain graph as rpe for the attention", required=False)
-    parser.add_argument("--no-gumbel", action="store_true",
-                        help="if present, use softmax instead of gumbel-softmax for generating the solution")
+    parser.add_argument("--greedy-decode", action="store_true",
+                        help="if present, use softmax instead of gumbel-softmax for decoding the solution from the logits")
     parser.add_argument("--tau", type=float, default=0.1, help="(gumbel)softmax temperature")
+    parser.add_argument("--destroy", type=str, default="random", choices=["random", "greedyworst", "stochasticworst", "stochasticrelated", "greedyrelated", "greedygradient", "stochasticgradient", "greedyconfidence", "stochasticconfidence"], required=False)
 
     return parser.parse_args()
 
@@ -65,7 +67,7 @@ def main():
     mixing_strategy = args.mixing_strategy
     ape_dim = args.ape_dim
     rpe = args.rpe
-    no_gumbel = args.no_gumbel
+    greedy_decode = args.greedy_decode
     tau = args.tau
 
     # training params
@@ -74,6 +76,7 @@ def main():
     loss_function_name = args.loss
     optimizer_name = args.optimizer
     batch_size = args.batch_size
+    destroy = args.destroy
 
     loss_functions = {"ABSE": CustomSudokuLossABSE,
                       "MSE": CustomSudokuLossMSE,
@@ -85,7 +88,7 @@ def main():
                        "Adam": optim.Adam,
                        }
 
-    model_name = f"sudoku-{rpe}rpe-{subset_threshold}-{args.data_range}-{ape_dim}dape-{mixing_strategy}mixer-{loss_function_name}-{'softmax' if no_gumbel else 'gumbel'}{tau}-{optimizer_name}-dropout{dropout}-embed{embedding_size}-{head_count}h{num_layers}l-bs{batch_size}-lr{learning_rate}"
+    model_name = f"sudoku-{rpe}rpe-{subset_threshold}-{args.data_range}-{ape_dim}dape-{mixing_strategy}mixer-destroy{destroy}-{loss_function_name}-{'softmax' if greedy_decode else 'gumbel'}{tau}-{optimizer_name}-dropout{dropout}-embed{embedding_size}-{head_count}h{num_layers}l-bs{batch_size}-lr{learning_rate}"
 
     inputs_path_train = f"./data/sudoku/sudoku_{args.data_range}_train.pt"
     inputs_path_test = f"./data/sudoku/sudoku_{args.data_range}_test.pt"
@@ -98,6 +101,23 @@ def main():
 
     train_loader, test_loader = sudoku_task.get_data_loaders(inputs_path_train, labels_path_train,
                                                              inputs_path_test, labels_path_test, batch_size)
+
+    use_constraint_graph = False
+    destroy_strategies = {
+        "random": lambda: RandomDestroyStrategy(),
+        "greedygradient": lambda: GreedyGradientDestroyStrategy(loss_func, use_constraint_graph),
+        "stochasticgradient": lambda: StochasticGradientDestroyStrategy(loss_func, use_constraint_graph),
+        "stochasticworst": lambda: StochasticWorstDestroyStrategy(loss_func, use_constraint_graph),
+        "stochasticconfidence": lambda: StochasticConfidenceDestroyStrategy(),
+        "greedyworst": lambda: GreedyWorstDestroyStrategy(loss_func, use_constraint_graph),
+        "greedyconfidence": lambda: GreedyConfidenceDestroyStrategy(),
+        "stochasticrelated": lambda: StochasticRelatedDestroyStrategy(use_constraint_graph),
+        "greedyrelated": lambda: GreedyRelatedDestroyStrategy(loss_func, use_constraint_graph),
+    }
+    try:
+        destroy_strategy = destroy_strategies[destroy]()
+    except KeyError as exc:
+        raise ValueError(f"Unsupported destroy strategy: {destroy}") from exc
 
     model = ConsFormer(input_size=input_size,
                        embedding_size=embedding_size,
@@ -113,14 +133,11 @@ def main():
                        mixing_strategy=mixing_strategy,
                        rpe=rpe,
                        tau=tau,
-                       no_gumbel=no_gumbel,
+                       greedy_decode=greedy_decode,
+                       destroy_strategy=destroy_strategy,
                        )
 
     optimizer = optimizer_funcs[optimizer_name](model.parameters(), lr=learning_rate)
-
-    # scheduler = ExponentialLR(optimizer, gamma=0.90)  # Exponential decay of learning rate
-    # scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=0.00001)
-    scheduler = None
 
     trainer = Trainer(
         model=model,
@@ -130,7 +147,6 @@ def main():
         test_loader=test_loader,
         num_epochs=num_epochs,
         optimizer=optimizer,
-        scheduler=scheduler,
         learning_rate=learning_rate,
         log_interval=10,
         model_name=model_name,
@@ -139,8 +155,8 @@ def main():
     if not args.no_train:
         trainer.train()
     trainer.model.load_state_dict(
-        torch.load(f"saved_models/{model_name}_best", map_location=device, weights_only=True))
-    run_analysis_sudoku(trainer, device, test_iters=[1,2,5,10])
+        torch.load(f"saved_models/{model_name}_final", map_location=device, weights_only=True))
+    run_analysis_sudoku(trainer, device, test_iters=[1, 2, 5, 10, 50, 100, 200, 500, 1000, 2000, 5000, 10000])
 
 
 if __name__ == '__main__':

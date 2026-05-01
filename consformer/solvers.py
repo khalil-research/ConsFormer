@@ -1,5 +1,6 @@
 from .modules import *
 from .embeddings import *
+from .destroy import RandomDestroyStrategy
 
 
 class ConsFormer(nn.Module):
@@ -22,8 +23,9 @@ class ConsFormer(nn.Module):
                  mixing_strategy="add",
                  tau=0.1,
                  rpe="mask",
-                 no_gumbel=False,
+                 greedy_decode=False,
                  task="sudoku",
+                 destroy_strategy=None,
                  ):
 
         super().__init__()
@@ -52,9 +54,11 @@ class ConsFormer(nn.Module):
         self.subset_threshold = subset_threshold
         self.ape_dim = ape_dim
         self.tau = tau
-        self.no_gumbel = no_gumbel
+        self.greedy_decode = greedy_decode
 
         self.task = task
+        self.destroy_strategy = destroy_strategy if destroy_strategy is not None else RandomDestroyStrategy()
+
 
     def _get_mask_indices(self, x: Tensor):
         """
@@ -65,22 +69,25 @@ class ConsFormer(nn.Module):
         mask = torch.sum(x, dim=-1) == 0  # check if none of the elements is 1 (i.e., sum is 0)
         return mask
 
-    def _sample_subset(self, var_inds):
+    def _sample_subset(self, inputs):
         """
-        var_inds is a boolean tensor with size (batch_size, seq_len)
-        We want to randomly turn "off" some of the variables to be updated
-        ie, among the True indices, sample a subset to update to False randomly based on gausian noise
-        return the updated var_inds
+        Delegate subset sampling to the configured destroy strategy.
+        Returns a boolean mask of editable variables to update.
         """
 
-        # Generate Uniform noise with the same shape as var_inds
-        noise = torch.rand(var_inds.shape, device=var_inds.device)
-        mask = (noise > self.subset_threshold)  # Noise greater than threshold will remain "True" in mask
-
-        # Update the var_inds by applying the mask
-        updated_var_inds = var_inds & mask
+        updated_var_inds = self.destroy_strategy.make_selection(self.subset_threshold, inputs)
 
         return updated_var_inds
+
+    def _decode(self, logits):
+
+        if self.greedy_decode:
+            scaled_logits = logits / self.tau
+            predictions = F.softmax(scaled_logits, dim=-1)
+        else:
+            predictions = F.gumbel_softmax(logits, tau=self.tau, hard=False, dim=-1)
+
+        return predictions
 
     def _get_pos_embedding(self, x):
         """
@@ -137,24 +144,25 @@ class ConsFormer(nn.Module):
         return pos
 
 
-    def forward(self, x: Tensor, binary_constraint_graph=None, variable_ind=None):
+    def forward(self, inputs):
         """
-        x has size (batch_size, embedding_size, seq_len)
-        variable_ind is a boolean tensor with size (batch_size, seq_len)
-          indicating which indices in seq_len are variables allowed to be updated
-          for example, it will be False for the given numbers in a sudoku board.
+        inputs:
+          - soft_onehot: (B, S, V)
+          - logits: (B, S, V)
+          - binary_constraint_graph: (B, S, S)
+          - variable_ind: (B, S) bool
         """
-
+        x = inputs["soft_onehot"]
+        logits = inputs["logits"]
+        binary_constraint_graph = inputs["binary_constraint_graph"]
+        variable_ind = inputs["variable_ind"]
         batch_size, seq_len, embedding_size = x.size()
         input_raw = x.clone()
-
-        if variable_ind is None:
-            variable_ind = torch.ones((batch_size, seq_len), dtype=torch.bool, device=x.device)  # var ind is of size (bs, var_seq_len)
 
         x = self.embedding_layer(x)
         pos = self._get_pos_embedding(x)
         if self.subset_improvement:
-            variable_ind = self._sample_subset(variable_ind)
+            variable_ind = self._sample_subset(inputs)
         x = self.embedding_mixer(x, self.mask_embedding, pos, variable_ind)
 
         rpe = ~binary_constraint_graph.bool()
@@ -163,13 +171,9 @@ class ConsFormer(nn.Module):
 
         out_logits = self.head(x)
 
-        if self.no_gumbel:
-            scaled_logits = out_logits / self.tau
-            predictions = F.softmax(scaled_logits, dim=-1)
-        else:
-            predictions = F.gumbel_softmax(out_logits, tau=self.tau, hard=False, dim=-1)
+        predictions = self._decode(out_logits)
 
         variable_ind_expanded = variable_ind.unsqueeze(-1).expand_as(input_raw)
         final_pred_onehot = torch.where(variable_ind_expanded == 1, predictions, input_raw)
 
-        return final_pred_onehot, out_logits
+        return {"preds_onehot":final_pred_onehot, "out_logits":out_logits}

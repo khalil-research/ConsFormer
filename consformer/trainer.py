@@ -53,6 +53,43 @@ class Trainer:
         mask = torch.sum(x, dim=-1) == 0  # check if none of the elements is 1 (i.e., sum is 0)
         return mask
 
+    def _clamp_givens_in_logits(self, z_logits: Tensor, x_givens_onehot: Tensor, variable_ind: Tensor, big: float = 30.0) -> Tensor:
+        """
+        Force givens to remain fixed in logit space.
+        """
+        givens_mask = (~variable_ind).unsqueeze(-1)
+        clamped = torch.where(
+            x_givens_onehot.bool(),
+            torch.full_like(z_logits, big),
+            torch.full_like(z_logits, -big),
+        )
+        return torch.where(givens_mask, clamped, z_logits)
+
+    def _build_initial_model_inputs(self, inputs: Tensor, constraint_graphs: Tensor, var_inds: Tensor) -> dict[str, Tensor]:
+        """
+        Build the first model input state using:
+        - random pre-softmax logits for unfilled variables
+        - softmax(logits) as soft_onehot for unfilled variables
+        - clamped logits for givens
+        """
+        soft_onehot = inputs.clone()
+        logits = torch.zeros_like(soft_onehot)
+
+        unfilled_inds = self._get_var_indices(soft_onehot)
+        if torch.any(unfilled_inds):
+            rand_logits = torch.rand(soft_onehot[unfilled_inds].size(), device=soft_onehot.device)
+            rand_soft = torch.softmax(rand_logits, dim=-1)
+            soft_onehot[unfilled_inds] = rand_soft
+            logits[unfilled_inds] = rand_logits
+
+        logits = self._clamp_givens_in_logits(logits, soft_onehot, var_inds)
+        return {
+            "soft_onehot": soft_onehot,
+            "logits": logits,
+            "binary_constraint_graph": constraint_graphs,
+            "variable_ind": var_inds,
+        }
+
     def _run_epoch_iter(self, loader, phase: str, iters=1):
         """
         Runs a single epoch with iterative calling specified by iter for the given phase: 'training', 'validation', or 'test'.
@@ -75,17 +112,17 @@ class Trainer:
                 constraint_graphs = constraint_graphs.to(self.device)
                 var_inds = var_inds.to(self.device)
 
-                #  if there are unfilled variables, intialize randomly
-                unfilled_inds = self._get_var_indices(inputs)
-                if torch.any(unfilled_inds):
-                  random_assign = torch.softmax(torch.rand(inputs[unfilled_inds].size()), dim=-1)
-                  inputs[unfilled_inds] = random_assign.to(self.device)
-
                 # Generate predictions in a loop
-                inputs_iter = inputs
+                inputs_iter = self._build_initial_model_inputs(inputs, constraint_graphs, var_inds)
                 for iter_step in range(iters):
-                    generator_preds_onehot, out_logits = self.model(inputs_iter, constraint_graphs, var_inds)
-                    inputs_iter = generator_preds_onehot
+                    outputs = self.model(inputs_iter)
+                    generator_preds_onehot, out_logits = outputs["preds_onehot"], outputs["out_logits"]
+                    inputs_iter = {
+                        "soft_onehot": generator_preds_onehot,
+                        "logits": out_logits,
+                        "binary_constraint_graph": constraint_graphs,
+                        "variable_ind": var_inds,
+                    }
 
                 # Loss and metrics computation
                 if is_train:
@@ -143,7 +180,7 @@ class Trainer:
                 self.scheduler.step()
 
             if self.test_loader and (epoch % self.log_interval == 0 or epoch == self.num_epochs):
-                test_loss, test_metrics = self._run_epoch_iter(self.test_loader, 'test', 10)
+                test_loss, test_metrics = self._run_epoch_iter(self.test_loader, 'test', 1)
                 if test_loss < best_test_loss:
                     best_test_loss = test_loss
                     torch.save(self.model.state_dict(), "./saved_models/" + self.model_name + f"_best")
@@ -183,20 +220,20 @@ class Trainer:
 
                 batch_size, seq_len, embedding_size = inputs.size()
 
-                # if there are unfilled variables, initialize randomly
-                unfilled_inds = self._get_var_indices(inputs)
-                if torch.any(unfilled_inds):
-                    random_assign = torch.softmax(torch.rand(inputs[unfilled_inds].size()), dim=-1)
-                    inputs[unfilled_inds] = random_assign.to(self.device)
-
                 solved_instances = torch.zeros(batch_size, dtype=torch.bool, device=self.device)
 
-                inputs_iter = inputs
+                inputs_iter = self._build_initial_model_inputs(inputs, constraint_graphs, var_inds)
                 for iter_step in range(1, max_iters + 1):
-                    generator_preds_onehot, out_logits = self.model(inputs_iter, constraint_graphs, var_inds)
+                    outputs = self.model(inputs_iter)
+                    generator_preds_onehot, out_logits = outputs["preds_onehot"], outputs["out_logits"]
                     correct_instances = self.csp_task.acc_fn.get_per_instance_accuracy(generator_preds_onehot)
                     solved_instances |= correct_instances
-                    inputs_iter = generator_preds_onehot
+                    inputs_iter = {
+                        "soft_onehot": generator_preds_onehot,
+                        "logits": out_logits,
+                        "binary_constraint_graph": constraint_graphs,
+                        "variable_ind": var_inds,
+                    }
 
                     if iter_step in iters:
                         end_time = time.time()
@@ -247,18 +284,18 @@ class Trainer:
 
                 batch_size, var_seq_len, embed_size = inputs.size()
 
-                # if there are unfilled variables, intialize randomly
-                unfilled_inds = self._get_var_indices(inputs)
-                if torch.any(unfilled_inds):
-                    random_assign = torch.softmax(torch.rand(inputs[unfilled_inds].size()), dim=-1)
-                    inputs[unfilled_inds] = random_assign.to(self.device)
-
                 solved_instances = torch.zeros(batch_size, dtype=torch.bool, device=self.device)
-                inputs_iter = inputs
+                inputs_iter = self._build_initial_model_inputs(inputs, constraint_graphs, var_inds)
                 curr_time_idx = 0
                 for iter_step in range(1, max_iters+1):
-                    generator_preds_onehot, out_logits = self.model(inputs_iter, constraint_graphs, var_inds)
-                    inputs_iter = generator_preds_onehot
+                    outputs = self.model(inputs_iter)
+                    generator_preds_onehot, out_logits = outputs["preds_onehot"], outputs["out_logits"]
+                    inputs_iter = {
+                        "soft_onehot": generator_preds_onehot,
+                        "logits": out_logits,
+                        "binary_constraint_graph": constraint_graphs,
+                        "variable_ind": var_inds,
+                    }
                     correct_instances = self.csp_task.acc_fn.get_per_instance_accuracy(generator_preds_onehot, constraint_graphs, var_inds)
                     solved_instances |= correct_instances
 
@@ -324,18 +361,18 @@ class MaxCutTrainer(Trainer):
 
                 batch_size, var_seq_len, embed_size = inputs.size()
 
-                # if there are unfilled variables, intialize randomly
-                unfilled_inds = self._get_var_indices(inputs)
-                if torch.any(unfilled_inds):
-                    random_assign = torch.softmax(torch.rand(inputs[unfilled_inds].size()), dim=-1)
-                    inputs[unfilled_inds] = random_assign.to(self.device)
-
                 current_best_cut = torch.zeros(batch_size, device=self.device)
-                inputs_iter = inputs
+                inputs_iter = self._build_initial_model_inputs(inputs, constraint_graphs, var_inds)
                 curr_time_idx = 0
                 for iter_step in range(1, max_iters + 1):
-                    generator_preds_onehot, out_logits = self.model(inputs_iter, constraint_graphs, var_inds)
-                    inputs_iter = generator_preds_onehot
+                    outputs = self.model(inputs_iter)
+                    generator_preds_onehot, out_logits = outputs["preds_onehot"], outputs["out_logits"]
+                    inputs_iter = {
+                        "soft_onehot": generator_preds_onehot,
+                        "logits": out_logits,
+                        "binary_constraint_graph": constraint_graphs,
+                        "variable_ind": var_inds,
+                    }
 
                     cut_sizes = self.csp_task.acc_fn.get_per_instance_cut_size(generator_preds_onehot,
                                                                                constraint_graphs)

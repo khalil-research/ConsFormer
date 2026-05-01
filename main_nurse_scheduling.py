@@ -44,7 +44,7 @@ def parse_args():
                         required=False)
     parser.add_argument("--rpe", type=str, choices=["learned", "mask", "no"], default="no",
                         help="if present use binary constrain graph as rpe for the attention", required=False)
-    parser.add_argument("--no-gumbel", action="store_true",
+    parser.add_argument("--greedy-decode", action="store_true",
                         help="if present, use softmax instead of gumbel-softmax for generating the solution")
     parser.add_argument("--tau", type=float, default=0.1, help="(gumbel)softmax temperature")
     return parser.parse_args()
@@ -75,7 +75,7 @@ def main():
     ape_dim = args.ape_dim
     rpe = args.rpe
     tau = args.tau
-    no_gumbel = args.no_gumbel
+    greedy_decode = args.greedy_decode
 
     # training params
     num_epochs = args.epochs
@@ -121,7 +121,7 @@ def main():
                        mixing_strategy=mixing_strategy,
                        rpe=rpe,
                        tau=tau,
-                       no_gumbel=no_gumbel,
+                       greedy_decode=greedy_decode,
                        )
 
     optimizer = optimizer_funcs[optimizer_name](model.parameters(), lr=learning_rate)

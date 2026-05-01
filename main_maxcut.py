@@ -5,6 +5,7 @@ from consformer.csptask import MaxCutTask
 from consformer.solvers import ConsFormer
 from consformer.criterion import *
 from consformer.trainer import MaxCutTrainer
+from consformer.destroy import *
 from analysis import *
 
 if torch.cuda.is_available():
@@ -35,9 +36,13 @@ def parse_args():
                         required=False)
     parser.add_argument("--rpe", type=str, choices=["learned", "mask", "no"], default="no",
                         help="if present use binary constrain graph as rpe for the attention", required=False)
-    parser.add_argument("--no-gumbel", action="store_true",
-                        help="if present, use softmax instead of gumbel-softmax for generating the solution")
+    parser.add_argument("--greedy-decode", action="store_true",
+                        help="if present, use softmax instead of gumbel-softmax for decoding the solution")
     parser.add_argument("--tau", type=float, default=0.1, help="(gumbel)softmax temperature")
+    parser.add_argument("--destroy", type=str, default="random",
+                        choices=["random", "greedyworst", "stochasticworst", "stochasticrelated", "greedyrelated",
+                                 "greedygradient", "stochasticgradient", "greedyconfidence", "stochasticconfidence"],
+                        required=False)
 
     parser.add_argument("--vertices", type=int, choices=[50, 100],
                         help="how many vertices should the graph have", default=50, required=False)
@@ -67,7 +72,8 @@ def main():
     ape_dim = args.ape_dim
     rpe = args.rpe
     tau = args.tau
-    no_gumbel = args.no_gumbel
+    greedy_decode = args.greedy_decode
+    destroy = args.destroy
 
     # training params
     num_epochs = args.epochs
@@ -76,7 +82,7 @@ def main():
     optimizer_name = args.optimizer
     batch_size = args.batch_size
 
-    model_name = f"CUT{vertices_count}-{rpe}rpe-{subset_threshold}-{ape_dim}pe-{mixing_strategy}mixer-{loss_function_name}-{'softmax' if no_gumbel else 'gumbel'}{tau}-{optimizer_name}-dropout{dropout}-embed{embedding_size}-{head_count}h{num_layers}l-bs{batch_size}-lr{learning_rate}"
+    model_name = f"CUT{vertices_count}-{rpe}rpe-{subset_threshold}-{ape_dim}pe-{mixing_strategy}mixer-destroy{destroy}-{loss_function_name}-{'softmax' if greedy_decode else 'gumbel'}{tau}-{optimizer_name}-dropout{dropout}-embed{embedding_size}-{head_count}h{num_layers}l-bs{batch_size}-lr{learning_rate}"
 
     print("model name: {}".format(model_name))
 
@@ -100,6 +106,23 @@ def main():
 
     train_loader, test_loader = max_cut_task.get_data_loaders(inputs_path_train,inputs_path_test, batch_size, vertices_count)
 
+    use_constraint_graph = True
+    destroy_strategies = {
+        "random": lambda: RandomDestroyStrategy(),
+        "greedygradient": lambda: GreedyGradientDestroyStrategy(loss_func, use_constraint_graph),
+        "stochasticgradient": lambda: StochasticGradientDestroyStrategy(loss_func, use_constraint_graph),
+        "stochasticworst": lambda: StochasticWorstDestroyStrategy(loss_func, use_constraint_graph),
+        "stochasticconfidence": lambda: StochasticConfidenceDestroyStrategy(),
+        "greedyworst": lambda: GreedyWorstDestroyStrategy(loss_func, use_constraint_graph),
+        "greedyconfidence": lambda: GreedyConfidenceDestroyStrategy(),
+        "stochasticrelated": lambda: StochasticRelatedDestroyStrategy(use_constraint_graph),
+        "greedyrelated": lambda: GreedyRelatedDestroyStrategy(loss_func, use_constraint_graph),
+    }
+    try:
+        destroy_strategy = destroy_strategies[destroy]()
+    except KeyError as exc:
+        raise ValueError(f"Unsupported destroy strategy: {destroy}") from exc
+
     model = ConsFormer(input_size=input_size,
                        embedding_size=embedding_size,
                        hidden_size=tf_hidden_size,
@@ -114,7 +137,8 @@ def main():
                        mixing_strategy=mixing_strategy,
                        rpe=rpe,
                        tau=tau,
-                       no_gumbel=no_gumbel,
+                       greedy_decode=greedy_decode,
+                       destroy_strategy=destroy_strategy,
                        )
 
     optimizer = optimizer_funcs[optimizer_name](model.parameters(), lr=learning_rate)
@@ -145,6 +169,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 
