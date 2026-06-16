@@ -2,8 +2,8 @@
 
 Official implementation of:
 
-- [*Self-Supervised Transformers as Iterative Solution Improvers for Constraint Satisfaction* (ICML 2025)](https://arxiv.org/abs/2502.15794)
-- [*Large Neighborhood Search meets Iterative Neural Constraint Heuristics* (CPAIOR 2026)](https://arxiv.org/abs/2603.20801)
+- [*Self-Supervised Transformers as Iterative Solution Improvers for Constraint Satisfaction* (ICML 2025)](https://proceedings.mlr.press/v267/xu25q.html)
+- [*Large Neighborhood Search meets Iterative Neural Constraint Heuristics* (CPAIOR 2026)](https://link.springer.com/chapter/10.1007/978-3-032-27242-3_37)
 
 ![ConsFormer Architecture](consformer_architecture.png)
 
@@ -126,11 +126,13 @@ If you use this code in your research, please cite:
 ```
 
 ```
-@article{xu2026lnsconsformer,
-  title={Large Neighborhood Search meets Iterative Neural Constraint Heuristics},
-  author={Xu, Yudong and Li, Wenhao and Sanner, Scott and Khalil, Elias Boutros},
-  journal={arXiv preprint arXiv:2603.20801},
-  year={2026}
+@inproceedings{xu2026large,
+  title={Large Neighborhood Search Meets Iterative Neural Constraint Heuristics},
+  author={Xu, Yudong W and Li, Wenhao and Sanner, Scott and Khalil, Elias B},
+  booktitle={International Conference on the Integration of Constraint Programming, Artificial Intelligence, and Operations Research},
+  pages={631--648},
+  year={2026},
+  organization={Springer}
 }
 ```
 
